@@ -8,7 +8,7 @@ module Cloudflare
       module CheckTrustedProxies
         def trusted_proxy?(ip)
           begin
-            ip =IPAddr.new(ip)
+            ip = IPAddr.new(ip)
           rescue IPAddr::InvalidAddressError
             return false
           else
