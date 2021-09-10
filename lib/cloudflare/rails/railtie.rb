@@ -5,23 +5,26 @@ module Cloudflare
     class Railtie < ::Rails::Railtie
       # patch rack::request::helpers to use our cloudflare ips - this way request.ip is
       # correct inside of rack and rails
-      module CheckTrustedProxies
-        def trusted_proxy?(ip)
-          begin
-            ip = \
-              case ip
-              when String
+      class CloudflareIpFilter
+        def initialize(wrapped_filter)
+          @wrapped_filter = wrapped_filter
+        end
+
+        def call(ip)
+          casted_ip = \
+            case ip
+            when String
+              begin
                 IPAddr.new(ip)
-              when IPAddr
-                ip
-              else
+              rescue IPAddr::InvalidAddressError
                 return false
               end
-          rescue IPAddr::InvalidAddressError
-            return false
-          else
-            ::Rails.application.config.cloudflare.ips.any? { |proxy| proxy === ip } || super
-          end
+            when IPAddr
+              ip
+            else
+              return false
+            end
+          ::Rails.application.config.cloudflare.ips.any? { |proxy| proxy === casted_ip} || @wrapped_filter.call(ip)
         end
       end
 
@@ -116,15 +119,9 @@ module Cloudflare
           end
         end
       end
-      initializer "my_railtie.configure_rails_initialization" do
-        Rack::Request::Helpers.prepend CheckTrustedProxies
 
-        ObjectSpace.each_object(Class).
-          select do |c|
-            c.included_modules.include?(Rack::Request::Helpers) &&
-            !c.included_modules.include?(CheckTrustedProxies)
-          end.
-          map { |c| c .prepend CheckTrustedProxies }
+      initializer "cloudflare_rails.configure_rails_initialization" do
+        Rack::Request.ip_filter = CloudflareIpFilter.new(Rack::Request.ip_filter)
 
         ActionDispatch::RemoteIp.prepend RemoteIpProxies
       end
